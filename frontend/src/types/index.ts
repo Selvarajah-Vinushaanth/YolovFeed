@@ -11,6 +11,7 @@ export interface Camera {
 export interface Detection {
   class_name?: string; // Made optional for safety
   confidence?: number; // Made optional for safety
+  is_selected?: boolean; // Flag to indicate if object should trigger alerts
   bbox: {
     x1: number;
     y1: number;
@@ -92,4 +93,11 @@ export interface ChatHistoryItem {
   ai_response?: string;
   timestamp: string;
   camera_id?: string;
+}
+
+export interface CameraSettings {
+  enabled_objects: string[];
+  detection_threshold: number;
+  show_bounding_boxes: boolean;
+  play_sound_alerts: boolean;
 }

@@ -47,7 +47,7 @@ load_dotenv()
 
 # Google Cloud Configuration
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT_ID")
-GOOGLE_API_KEY = "AIza################################"
+GOOGLE_API_KEY = "AIz######################8"
 
 # Initialize Firebase Admin SDK
 try:
@@ -165,9 +165,16 @@ class ChatResponse(BaseModel):
     response: str
     timestamp: str
 
+class CameraSettings(BaseModel):
+    enabled_objects: List[str] = []
+    detection_threshold: float = 0.5
+    show_bounding_boxes: bool = True
+    play_sound_alerts: bool = True
+
 # Global variables
 active_cameras = {}
 detection_enabled = {}
+camera_settings = {}  # Store per-camera object filtering settings
 
 # WebSocket connection manager
 class ConnectionManager:
@@ -216,7 +223,18 @@ async def process_camera_frame(camera_id: str, ip_address: str, port: int):
             if detection_enabled.get(camera_id, False) and model:
                 results = model(frame)
                 
-                # Process detections
+                # Get camera settings for filtering
+                cam_settings = camera_settings.get(camera_id, {
+                    'enabled_objects': ['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'],
+                    'detection_threshold': 0.5,
+                    'show_bounding_boxes': True,
+                    'play_sound_alerts': True
+                })
+                enabled_objects = cam_settings.get('enabled_objects', [])
+                threshold = cam_settings.get('detection_threshold', 0.5)
+                show_boxes = cam_settings.get('show_bounding_boxes', True)
+                
+                # Process detections - DETECT ALL OBJECTS
                 object_counts = {}
                 detections_data = []
                 
@@ -230,20 +248,37 @@ async def process_camera_frame(camera_id: str, ip_address: str, port: int):
                             class_id = int(box.cls[0].cpu().numpy())
                             class_name = model.names[class_id]
                             
-                            if confidence > 0.5:  # Confidence threshold
-                                # Count objects
+                            # Show ALL objects that meet confidence threshold
+                            if confidence > threshold:
+                                # Count ALL objects
                                 object_counts[class_name] = object_counts.get(class_name, 0) + 1
                                 
-                                # Draw bounding box
-                                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                                cv2.putText(frame, f"{class_name}: {confidence:.2f}", 
-                                          (int(x1), int(y1-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                                # Check if this object is in the selected list
+                                is_selected = (len(enabled_objects) == 0 or class_name in enabled_objects)
                                 
-                                # Store detection
+                                # Draw bounding box if enabled
+                                if show_boxes:
+                                    # RED boxes for SELECTED objects, GREEN for all others
+                                    if is_selected:
+                                        color = (0, 0, 255)  # RED for selected objects
+                                        thickness = 3
+                                    else:
+                                        color = (0, 255, 0)  # GREEN for other detected objects
+                                        thickness = 2
+                                    
+                                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, thickness)
+                                    
+                                    # Label with different colors
+                                    label_color = (255, 255, 255) if is_selected else (0, 0, 0)
+                                    cv2.putText(frame, f"{class_name}: {confidence:.2f}", 
+                                              (int(x1), int(y1-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, label_color, 2)
+                                
+                                # Store detection with selection flag
                                 detections_data.append({
                                     'camera_id': camera_id,
                                     'class': class_name,
                                     'confidence': float(confidence),
+                                    'is_selected': is_selected,  # Flag to indicate if object should trigger alerts
                                     'bbox': [int(x1), int(y1), int(x2-x1), int(y2-y1)]
                                 })
                 
@@ -256,7 +291,12 @@ async def process_camera_frame(camera_id: str, ip_address: str, port: int):
                         'camera_id': camera_id,
                         'detections': detections_data,
                         'object_counts': object_counts,
-                        'timestamp': detection_timestamp
+                        'timestamp': detection_timestamp,
+                        'settings': {
+                            'enabled_objects': cam_settings.get('enabled_objects', []),
+                            'play_sound_alerts': cam_settings.get('play_sound_alerts', True),
+                            'detection_threshold': cam_settings.get('detection_threshold', 0.5)
+                        }
                     }))
                     
                     # Save analytics to database
@@ -531,6 +571,74 @@ async def toggle_detection(camera_id: str, enabled: bool, current_user: dict = D
     detection_enabled[camera_id] = enabled
     
     return {"message": f"Detection {'enabled' if enabled else 'disabled'} for camera {camera_id}"}
+
+@app.post("/cameras/{camera_id}/settings")
+async def update_camera_settings(camera_id: str, settings: CameraSettings, current_user: dict = Depends(get_current_user)):
+    """Update camera object detection settings"""
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    try:
+        # Verify camera ownership
+        camera_doc = await db.collection('cameras').document(camera_id).get()
+        if camera_doc.exists:
+            camera_data = camera_doc.to_dict()
+            if camera_data.get('user_id') != current_user.get('uid'):
+                raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Update camera settings in Firestore
+        settings_data = {
+            'enabled_objects': settings.enabled_objects,
+            'detection_threshold': settings.detection_threshold,
+            'show_bounding_boxes': settings.show_bounding_boxes,
+            'play_sound_alerts': settings.play_sound_alerts,
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        await db.collection('camera_settings').document(camera_id).set(settings_data)
+        
+        # Update in-memory settings
+        camera_settings[camera_id] = settings_data
+        
+        return {"message": "Camera settings updated successfully", "settings": settings_data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating camera settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update camera settings")
+
+@app.get("/cameras/{camera_id}/settings")
+async def get_camera_settings(camera_id: str, current_user: dict = Depends(get_current_user)):
+    """Get camera object detection settings"""
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not initialized")
+    
+    try:
+        # Verify camera ownership
+        camera_doc = await db.collection('cameras').document(camera_id).get()
+        if camera_doc.exists:
+            camera_data = camera_doc.to_dict()
+            if camera_data.get('user_id') != current_user.get('uid'):
+                raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Get settings from Firestore
+        settings_doc = await db.collection('camera_settings').document(camera_id).get()
+        if settings_doc.exists:
+            return settings_doc.to_dict()
+        else:
+            # Return default settings if none exist
+            default_settings = {
+                'enabled_objects': ['person', 'car', 'truck', 'bus', 'motorcycle', 'bicycle'],
+                'detection_threshold': 0.5,
+                'show_bounding_boxes': True,
+                'play_sound_alerts': True
+            }
+            return default_settings
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error getting camera settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get camera settings")
 
 @app.get("/analytics/{camera_id}")
 async def get_analytics(camera_id: str, hours: int = 24, current_user: dict = Depends(get_current_user)):

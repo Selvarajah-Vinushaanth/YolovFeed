@@ -20,10 +20,20 @@ class AudioManager {
 
   async initialize() {
     try {
+      console.log('🔊 AudioManager: Initializing...');
       this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      // Resume audio context if suspended (required for user interaction policy)
+      if (this.audioContext.state === 'suspended') {
+        console.log('🔊 AudioManager: Resuming suspended audio context...');
+        await this.audioContext.resume();
+      }
+      
+      console.log('🔊 AudioManager: Audio context state:', this.audioContext.state);
       await this.loadSounds();
+      console.log('🔊 AudioManager: Initialization complete!');
     } catch (error) {
-      console.error('Failed to initialize audio:', error);
+      console.error('❌ AudioManager: Failed to initialize audio:', error);
     }
   }
 
@@ -141,7 +151,20 @@ class AudioManager {
   }
 
   async playSound(soundName: string, volume: number = 1) {
-    if (!this.enabled || !this.audioContext || !this.soundBuffers.has(soundName)) {
+    console.log(`🔊 AudioManager: Attempting to play sound '${soundName}' at volume ${volume}`);
+    
+    if (!this.enabled) {
+      console.log('❌ AudioManager: Sound disabled');
+      return;
+    }
+    
+    if (!this.audioContext) {
+      console.log('❌ AudioManager: No audio context available');
+      return;
+    }
+    
+    if (!this.soundBuffers.has(soundName)) {
+      console.log(`❌ AudioManager: Sound '${soundName}' not found in buffers. Available:`, Array.from(this.soundBuffers.keys()));
       return;
     }
 
@@ -180,9 +203,11 @@ class AudioManager {
 
   // Play object detection sound based on object type
   playObjectDetectionSound(objectType: string, confidence: number) {
+    console.log(`🔊 AudioManager: playObjectDetectionSound called with '${objectType}', confidence: ${confidence}`);
+    
     // Add null/undefined checks
     if (!objectType || typeof objectType !== 'string') {
-      console.warn('Invalid objectType provided to playObjectDetectionSound:', objectType);
+      console.warn('❌ AudioManager: Invalid objectType provided to playObjectDetectionSound:', objectType);
       return;
     }
 
@@ -200,11 +225,17 @@ class AudioManager {
       'dog': 'dog',
       'cat': 'cat',
       'bird': 'bird',
+      'chair': 'click',  // Add chair
+      'bottle': 'click', // Add more objects with fallback sounds
+      'laptop': 'click',
+      'cell phone': 'click',
+      'book': 'click'
     };
 
     const soundName = soundMap[objectType.toLowerCase()] || 'click';
     const volume = confidence > 0.8 ? 1 : confidence > 0.5 ? 0.7 : 0.5;
     
+    console.log(`🔊 AudioManager: Playing sound '${soundName}' for object '${objectType}' at volume ${volume}`);
     this.playSound(soundName, volume);
   }
 

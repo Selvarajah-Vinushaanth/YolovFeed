@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { Camera, CameraStatus, DetectionResult, CameraStream, ObjectCount } from '../types';
+import { Camera, CameraStatus, DetectionResult, CameraStream, ObjectCount, CameraSettings } from '../types';
 import { cameraAPI } from '../services/api';
 import { useSocket } from './SocketContext';
 import toast from 'react-hot-toast';
@@ -10,11 +10,14 @@ interface CameraContextType {
   detectionResults: { [cameraId: string]: DetectionResult };
   cameraStreams: { [cameraId: string]: string };
   objectCounts: { [cameraId: string]: ObjectCount };
+  cameraSettings: { [cameraId: string]: CameraSettings };
   addCamera: (camera: { name: string; ip_address: string; port: number }) => Promise<void>;
   deleteCamera: (cameraId: string) => Promise<void>;
   startCamera: (cameraId: string) => Promise<void>;
   stopCamera: (cameraId: string) => Promise<void>;
   toggleDetection: (cameraId: string, enabled: boolean) => Promise<void>;
+  updateCameraSettings: (cameraId: string, settings: CameraSettings) => Promise<void>;
+  getCameraSettings: (cameraId: string) => Promise<CameraSettings>;
   refreshCameras: () => Promise<void>;
   isLoading: boolean;
   connectionStatus: boolean; // Add this to the context type
@@ -40,6 +43,7 @@ export const CameraProvider: React.FC<CameraProviderProps> = ({ children }) => {
   const [detectionResults, setDetectionResults] = useState<{ [cameraId: string]: DetectionResult }>({});
   const [cameraStreams, setCameraStreams] = useState<{ [cameraId: string]: string }>({});
   const [objectCounts, setObjectCounts] = useState<{ [cameraId: string]: ObjectCount }>({});
+  const [cameraSettings, setCameraSettings] = useState<{ [cameraId: string]: CameraSettings }>({});
   const [isLoading, setIsLoading] = useState(true);
 
   const { ws, isConnected } = useSocket();
@@ -318,17 +322,50 @@ export const CameraProvider: React.FC<CameraProviderProps> = ({ children }) => {
     }
   };
 
+  const updateCameraSettings = async (cameraId: string, settings: CameraSettings) => {
+    try {
+      await cameraAPI.updateCameraSettings(cameraId, settings);
+      setCameraSettings(prev => ({
+        ...prev,
+        [cameraId]: settings
+      }));
+      toast.success('Camera settings updated', { duration: 1500 });
+    } catch (error) {
+      console.error('Error updating camera settings:', error);
+      toast.error('Failed to update camera settings');
+      throw error;
+    }
+  };
+
+  const getCameraSettings = async (cameraId: string): Promise<CameraSettings> => {
+    try {
+      const settings = await cameraAPI.getCameraSettings(cameraId);
+      setCameraSettings(prev => ({
+        ...prev,
+        [cameraId]: settings
+      }));
+      return settings;
+    } catch (error) {
+      console.error('Error getting camera settings:', error);
+      toast.error('Failed to get camera settings');
+      throw error;
+    }
+  };
+
   const value = {
     cameras,
     cameraStatuses,
     detectionResults, // Ensure this is included
     cameraStreams,
     objectCounts, // Ensure this is included
+    cameraSettings,
     addCamera,
     deleteCamera,
     startCamera,
     stopCamera,
     toggleDetection,
+    updateCameraSettings,
+    getCameraSettings,
     refreshCameras,
     isLoading,
     connectionStatus,

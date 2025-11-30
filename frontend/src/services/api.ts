@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Camera, AddCameraForm, AnalyticsData, ChatMessage, ChatResponse } from '../types';
+import { Camera, AddCameraForm, AnalyticsData, ChatMessage, ChatResponse, CameraSettings } from '../types';
 import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 import { auth } from '../config/firebase';
@@ -81,6 +81,17 @@ export const cameraAPI = {
   // Toggle object detection
   toggleDetection: async (cameraId: string, enabled: boolean): Promise<void> => {
     await api.post(`/cameras/${cameraId}/detection/${enabled}`);
+  },
+
+  // Update camera object detection settings
+  updateCameraSettings: async (cameraId: string, settings: CameraSettings): Promise<void> => {
+    await api.post(`/cameras/${cameraId}/settings`, settings);
+  },
+
+  // Get camera object detection settings
+  getCameraSettings: async (cameraId: string): Promise<CameraSettings> => {
+    const response = await api.get(`/cameras/${cameraId}/settings`);
+    return response.data;
   },
 
   // Get analytics for a camera

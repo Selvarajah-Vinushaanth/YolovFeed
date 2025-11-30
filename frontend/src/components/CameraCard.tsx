@@ -16,6 +16,7 @@ import {
 import { Camera } from '../types';
 import { useCamera } from '../contexts/CameraContext';
 import CameraStream from './CameraStream';
+import CameraSettingsModal from './CameraSettingsModal';
 
 interface CameraCardProps {
   camera: Camera;
@@ -26,6 +27,7 @@ interface CameraCardProps {
 const CameraCard: React.FC<CameraCardProps> = ({ camera, onShowAnalytics, onPreview }) => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   
   const {
     cameraStatuses,
@@ -132,7 +134,7 @@ const CameraCard: React.FC<CameraCardProps> = ({ camera, onShowAnalytics, onPrev
       {/* Camera Stream */}
       <div 
         className="relative bg-gray-900 aspect-video cursor-pointer hover:bg-opacity-90 transition-all duration-200"
-        onClick={onPreview}
+        onClick={onPreview || (() => {})}
         title="Click to preview in full screen"
       >
         <CameraStream cameraId={camera.id} />
@@ -234,6 +236,15 @@ const CameraCard: React.FC<CameraCardProps> = ({ camera, onShowAnalytics, onPrev
               <BarChart3 className="w-4 h-4" />
             </button>
             
+            {/* Settings Button */}
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="p-1 text-gray-600 hover:text-purple-600 transition-colors duration-200"
+              title="Camera Settings"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            
             <button
               onClick={handleDeleteClick}
               disabled={isDeleting}
@@ -326,6 +337,14 @@ const CameraCard: React.FC<CameraCardProps> = ({ camera, onShowAnalytics, onPrev
           </div>
         </div>
       )}
+      
+      {/* Camera Settings Modal */}
+      <CameraSettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        cameraId={camera.id}
+        cameraName={camera.name}
+      />
     </div>
   );
 };

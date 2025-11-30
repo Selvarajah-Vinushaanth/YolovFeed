@@ -2,13 +2,13 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Camera } from 'lucide-react';
 import { useCamera } from '../contexts/CameraContext';
 import { Detection } from '../types';
-import AudioManager from '../services/AudioManager';
 
 interface InteractiveCameraStreamProps {
   cameraId: string;
   enableObjectClick?: boolean;
   enableSoundAlerts?: boolean;
   onObjectClick?: (detection: Detection) => void;
+  onSelectedObjectDetected?: (objectType: string, confidence: number) => void;
 }
 
 interface ClickableDetection extends Detection {
@@ -23,32 +23,64 @@ const InteractiveCameraStream: React.FC<InteractiveCameraStreamProps> = ({
   cameraId, 
   enableObjectClick = false,
   enableSoundAlerts = false,
-  onObjectClick
+  onObjectClick,
+  onSelectedObjectDetected
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [clickableDetections, setClickableDetections] = useState<ClickableDetection[]>([]);
   const [lastSoundTime, setLastSoundTime] = useState<{ [key: string]: number }>({});
-  const { cameraStreams, cameraStatuses, detectionResults } = useCamera();
+  const [audioInitialized, setAudioInitialized] = useState(false);
+  const { cameraStreams, cameraStatuses, detectionResults, cameraSettings } = useCamera();
   
   const currentStream = cameraStreams[cameraId];
   const status = cameraStatuses[cameraId];
   const detections = detectionResults[cameraId];
+  const settings = cameraSettings[cameraId];
 
   // Sound cooldown to prevent spam (1 second per object type)
   const SOUND_COOLDOWN = 1000;
 
+  // Initialize audio on component mount
+  useEffect(() => {
+    const initAudio = async () => {
+      if (!audioInitialized) {
+        console.log(' InteractiveCameraStream: Initializing AudioManager...');
+        // await AudioManager.getInstance().initialize();
+        setAudioInitialized(true);
+        console.log('✅ InteractiveCameraStream: AudioManager initialized');
+      }
+    };
+    
+    // Initialize on first user interaction
+    const handleFirstClick = () => {
+      initAudio();
+      document.removeEventListener('click', handleFirstClick);
+    };
+    
+    document.addEventListener('click', handleFirstClick);
+    return () => document.removeEventListener('click', handleFirstClick);
+  }, [audioInitialized]);
+
   const playDetectionSound = useCallback((objectType: string, confidence: number) => {
-    if (!enableSoundAlerts || !objectType) return;
+    console.log(`🔊 InteractiveCameraStream: Selected object detected: '${objectType}' with confidence ${confidence}`);
+    
+    if (!enableSoundAlerts || !objectType || !onSelectedObjectDetected) {
+      console.log('❌ Sound alerts disabled, no object type, or no callback provided');
+      return;
+    }
     
     const now = Date.now();
     const lastPlayTime = lastSoundTime[objectType] || 0;
     
     if (now - lastPlayTime > SOUND_COOLDOWN) {
-      AudioManager.getInstance().playObjectDetectionSound(objectType, confidence || 0.5);
+      console.log(`✅ Triggering custom sound callback for '${objectType}'`);
+      onSelectedObjectDetected(objectType, confidence || 0.5);
       setLastSoundTime(prev => ({ ...prev, [objectType]: now }));
+    } else {
+      console.log(`⏳ Sound cooldown active for '${objectType}' (${SOUND_COOLDOWN - (now - lastPlayTime)}ms remaining)`);
     }
-  }, [enableSoundAlerts, lastSoundTime]);
+  }, [enableSoundAlerts, lastSoundTime, onSelectedObjectDetected]);
 
   const calculateScreenCoordinates = useCallback((detection: Detection, imageWidth: number, imageHeight: number) => {
     const canvas = canvasRef.current;
@@ -101,9 +133,12 @@ const InteractiveCameraStream: React.FC<InteractiveCameraStreamProps> = ({
           ...screenCoords
         });
 
-        // Play sound for new detections
-        if (enableSoundAlerts && detection.class_name) {
+        // Play sound for new detections - ONLY for selected objects (red boxes)
+        if (enableSoundAlerts && detection.class_name && detection.is_selected) {
+          console.log(`🎯 InteractiveCameraStream: Selected object detected: '${detection.class_name}' (confidence: ${detection.confidence}) - Playing sound!`);
           playDetectionSound(detection.class_name, detection.confidence || 0.5);
+        } else if (detection.class_name) {
+          console.log(`👁️ InteractiveCameraStream: Non-selected object detected: '${detection.class_name}' (is_selected: ${detection.is_selected}) - No sound`);
         }
       }
     });
@@ -112,17 +147,14 @@ const InteractiveCameraStream: React.FC<InteractiveCameraStreamProps> = ({
   }, [detections, enableObjectClick, enableSoundAlerts, calculateScreenCoordinates, cameraId, playDetectionSound]);
 
   const handleObjectClick = (detection: ClickableDetection) => {
-    // Play click sound
-    AudioManager.getInstance().playUISound('click');
-    
     // Custom click handler
     if (onObjectClick) {
       onObjectClick(detection);
     }
 
-    // Play object-specific sound with safety check
-    if (detection.class_name) {
-      AudioManager.getInstance().playObjectDetectionSound(detection.class_name, detection.confidence || 0.5);
+    // Trigger custom sound callback for clicked object
+    if (detection.class_name && onSelectedObjectDetected) {
+      onSelectedObjectDetected(detection.class_name, detection.confidence || 0.5);
     }
   };
 
@@ -159,25 +191,13 @@ const InteractiveCameraStream: React.FC<InteractiveCameraStreamProps> = ({
 
   const drawBoundingBoxes = (ctx: CanvasRenderingContext2D, detections: Detection[]) => {
     detections.forEach((detection, index) => {
-      const { bbox, class_name, confidence } = detection;
+      const { bbox, class_name, confidence, is_selected } = detection;
       
       // Skip detection if essential data is missing
       if (!class_name || !bbox) return;
       
-      // Choose color based on object type
-      const colors: { [key: string]: string } = {
-        'person': '#ff6b6b',
-        'car': '#4ecdc4',
-        'truck': '#45b7d1',
-        'bus': '#96ceb4',
-        'motorcycle': '#ffeaa7',
-        'bicycle': '#fd79a8',
-        'dog': '#fdcb6e',
-        'cat': '#e17055',
-        'bird': '#81ecec',
-      };
-      
-      const color = colors[class_name.toLowerCase()] || '#74b9ff';
+      // Choose color based on whether object is selected (red) or not (green)
+      const color = is_selected ? '#ff0000' : '#00ff00'; // Red for selected, Green for others
       
       // Draw bounding box
       ctx.strokeStyle = color;
